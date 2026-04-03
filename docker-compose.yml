@@ -1,0 +1,209 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # PostgreSQL Database
+  # ============================================
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ai-agent-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ai_agent_platform
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai-agent-network
+
+  # ============================================
+  # Redis Cache & Pub/Sub
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: ai-agent-redis
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ai-agent-network
+
+  # ============================================
+  # API Server (FastAPI)
+  # ============================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: ai-agent-api
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/ai_agent_platform
+      - REDIS_URL=redis://redis:6379/0
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-fireworks}
+      - MODEL_NAME=${MODEL_NAME:-accounts/fireworks/routers/kimi-k2p5-turbo}
+      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - ai-agent-network
+
+  # ============================================
+  # Agent Runtime
+  # ============================================
+  agent-runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: ai-agent-runtime
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/ai_agent_platform
+      - REDIS_URL=redis://redis:6379/0
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-fireworks}
+      - MODEL_NAME=${MODEL_NAME:-accounts/fireworks/routers/kimi-k2p5-turbo}
+      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
+      - API_BASE_URL=http://api:8000
+      - LOG_LEVEL=INFO
+    depends_on:
+      - api
+      - postgres
+      - redis
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    networks:
+      - ai-agent-network
+
+  # ============================================
+  # Celery Workers
+  # ============================================
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: ai-agent-worker
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/ai_agent_platform
+      - REDIS_URL=redis://redis:6379/0
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-fireworks}
+      - MODEL_NAME=${MODEL_NAME:-accounts/fireworks/routers/kimi-k2p5-turbo}
+      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
+      - API_BASE_URL=http://api:8000
+      - C_FORCE_ROOT=true
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    networks:
+      - ai-agent-network
+
+  # ============================================
+  # Telegram Bot
+  # ============================================
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.telegram
+    container_name: ai-agent-telegram
+    restart: always
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
+      - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}
+      - API_BASE_URL=http://api:8000
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-fireworks}
+      - MODEL_NAME=${MODEL_NAME:-accounts/fireworks/routers/kimi-k2p5-turbo}
+      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LOG_LEVEL=INFO
+    depends_on:
+      - api
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - ai-agent-network
+
+  # ============================================
+  # Ollama (Optional - for local LLMs)
+  # ============================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ai-agent-ollama
+    restart: always
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+    networks:
+      - ai-agent-network
+    # Uncomment to use GPU
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
+
+networks:
+  ai-agent-network:
+    driver: bridge
