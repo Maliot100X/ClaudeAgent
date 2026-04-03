@@ -1,0 +1,43 @@
+name: quicknode-solana
+version: 1.0.0
+description: QuickNode Solana RPC integration for real-time blockchain operations
+author: AI Agent Platform
+keywords:
+  - solana
+  - blockchain
+  - rpc
+  - quicknode
+  - trading
+  - wallet
+
+configuration:
+  quicknode_http_url:
+    type: string
+    required: true
+    description: QuickNode HTTP RPC URL
+  quicknode_ws_url:
+    type: string
+    required: true
+    description: QuickNode WebSocket RPC URL
+
+endpoints:
+  get_slot:
+    method: POST
+    path: /rpc/getSlot
+    description: Get current Solana slot
+  get_balance:
+    method: POST
+    path: /rpc/getBalance
+    description: Get wallet balance
+  get_token_accounts:
+    method: POST
+    path: /rpc/getTokenAccountsByOwner
+    description: Get token accounts for wallet
+  subscribe_account:
+    method: WS
+    path: /ws/accountSubscribe
+    description: Subscribe to account changes
+  send_transaction:
+    method: POST
+    path: /rpc/sendTransaction
+    description: Send signed transaction
